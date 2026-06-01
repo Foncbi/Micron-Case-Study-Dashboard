@@ -133,24 +133,35 @@ if failure_mode == "Healthy":
     actual_force = golden_force + np.random.normal(0, 1, len(time))
 
 elif failure_mode == "Non-wet open risk":
-    actual_temp = golden_temp - 25 + np.random.normal(0, 3, len(time))
-    actual_z = golden_z + 8 + np.random.normal(0, 1.2, len(time))
-    actual_force = golden_force - 5 + np.random.normal(0, 1.5, len(time))
+    # Main pattern:
+    # Temperature is lower than expected, Z-axis does not collapse enough,
+    # and force response is slightly weak.
+    actual_temp = golden_temp - 15 + np.random.normal(0, 3, len(time))
+    actual_z = golden_z + 5 + np.random.normal(0, 1.2, len(time))
+    actual_force = golden_force - 3 + np.random.normal(0, 1.5, len(time))
 
 elif failure_mode == "Solder bridging risk":
+    # Main pattern:
+    # Z-axis moves too deep, force response is high,
+    # temperature is mostly normal.
     actual_temp = golden_temp + np.random.normal(0, 2, len(time))
-    actual_z = golden_z - 9 + np.random.normal(0, 1.2, len(time))
-    actual_force = golden_force + 10 + np.random.normal(0, 2, len(time))
+    actual_z = golden_z - 5.5 + np.random.normal(0, 1.2, len(time))
+    actual_force = golden_force + 6 + np.random.normal(0, 2, len(time))
 
 elif failure_mode == "VCM-only anomaly":
+    # Main pattern:
+    # VCM/force is abnormal, but Z-axis remains normal.
+    # This should be treated more like a tool/actuator issue.
     actual_temp = golden_temp + np.random.normal(0, 2, len(time))
     actual_z = golden_z + np.random.normal(0, 0.8, len(time))
-    actual_force = golden_force + 14 + np.random.normal(0, 2.2, len(time))
+    actual_force = golden_force + 10 + np.random.normal(0, 2.2, len(time))
 
 else:
-    actual_temp = golden_temp - 18 + np.random.normal(0, 4, len(time))
-    actual_z = golden_z - 6 + np.random.normal(0, 1.8, len(time))
-    actual_force = golden_force + 8 + np.random.normal(0, 2.5, len(time))
+    # Mixed anomaly:
+    # Several signals move away from normal at the same time.
+    actual_temp = golden_temp - 12 + np.random.normal(0, 4, len(time))
+    actual_z = golden_z - 4 + np.random.normal(0, 1.8, len(time))
+    actual_force = golden_force + 5 + np.random.normal(0, 2.5, len(time))
 
 # -------------------------------------------------
 # Signal errors
@@ -242,6 +253,7 @@ if z_overtravel_detected:
 if force_high_detected and z_overtravel_detected:
     bridging_raw += force_high * 1.5
 elif force_high_detected and not z_overtravel_detected:
+    # VCM alone should not heavily increase bridging risk.
     bridging_raw += force_high * 0.25
 
 if alignment_abnormal:
@@ -258,14 +270,14 @@ if z_undertravel_detected:
 if force_low > 3.0 and z_undertravel_detected:
     nonwet_raw += force_low * 1.0
 
-bridging_score = min(95, int(bridging_raw * 1.7))
-nonwet_score = min(95, int(nonwet_raw * 1.8))
+bridging_score = min(95, int(bridging_raw * 1.25))
+nonwet_score = min(95, int(nonwet_raw * 1.35))
 
 
 def level_from_score(score):
     if score <= 30:
         return "LOW"
-    elif score <= 75:
+    elif score <= 80:
         return "MEDIUM"
     else:
         return "HIGH"
@@ -286,12 +298,12 @@ raw_score = (
 if force_abnormal and not z_abnormal:
     raw_score *= 0.75
 
-risk_score = min(95, int(raw_score * 2.2))
+risk_score = min(95, int(raw_score * 1.6))
 
 if risk_score <= 30:
     risk_level = "LOW"
     action = "Continue production"
-elif risk_score <= 75:
+elif risk_score <= 80:
     risk_level = "MEDIUM"
     action = "Tag unit/lot for enhanced inspection"
 else:
@@ -352,7 +364,11 @@ profile_table = pd.DataFrame({
     ]
 })
 
-st.table(profile_table)
+st.dataframe(
+    profile_table,
+    hide_index=True,
+    use_container_width=True
+)
 
 # -------------------------------------------------
 # Signal comparison charts
@@ -417,7 +433,7 @@ def plot_signal(title, actual, golden, reconstructed, lower, upper, ylabel):
     )
 
     ax.set_title(title, color="white", fontsize=12, fontweight="bold")
-    ax.set_xlabel("Time during TCB cycle", color="white")
+    ax.set_xlabel("Time during TCB cycle (s)", color="white")
     ax.set_ylabel(ylabel, color="white")
 
     ax.grid(True, color="#2D3748", alpha=0.38, linestyle="--", linewidth=0.7)
@@ -461,7 +477,7 @@ with c2:
         reconstructed_z,
         z_lower,
         z_upper,
-        "Z Position / Bond Height"
+        "Z-axis Position / Bond Height (µm)"
     )
 
 with c3:
@@ -472,7 +488,7 @@ with c3:
         reconstructed_force,
         force_lower,
         force_upper,
-        "Force Proxy"
+        "VCM Current / Force Proxy (A)"
     )
 
 # -------------------------------------------------
@@ -512,7 +528,11 @@ mechanical_table = pd.DataFrame({
     ]
 })
 
-st.table(mechanical_table)
+st.dataframe(
+    mechanical_table,
+    hide_index=True,
+    use_container_width=True
+)
 
 # -------------------------------------------------
 # Key risk driver breakdown
@@ -600,14 +620,14 @@ st.dataframe(
 # -------------------------------------------------
 st.subheader("Failure Mode Risk Mapping")
 
-if bridging_score > 75:
+if bridging_score > 80:
     bridging_evidence = "Z-axis over-travel + low bond height behaviour + VCM support + alignment/theta offset"
 elif bridging_score > 30:
     bridging_evidence = "Partial mechanical evidence; verify Z-axis and final bond height"
 else:
     bridging_evidence = "No strong bridging evidence from cross-validated mechanical signals"
 
-if nonwet_score > 75:
+if nonwet_score > 80:
     nonwet_evidence = "Delayed thermal response + insufficient bump collapse + weak force support"
 elif nonwet_score > 30:
     nonwet_evidence = "Partial thermal or collapse evidence; inspect non-wet open risk"
@@ -633,7 +653,11 @@ failure_mode_table = pd.DataFrame({
     ]
 })
 
-st.table(failure_mode_table)
+st.dataframe(
+    failure_mode_table,
+    hide_index=True,
+    use_container_width=True
+)
 
 # -------------------------------------------------
 # Risk trend monitoring
@@ -642,22 +666,85 @@ st.subheader("Risk Trend by Bonding Cycle / Lot")
 
 cycle_ids = list(range(1, 11))
 
-base_risks = np.clip(
-    np.linspace(max(5, risk_score - 25), risk_score, 10)
-    + np.random.normal(0, 5, 10),
-    0,
-    100
+
+def make_trend(start, end, noise=0.4):
+    trend = np.linspace(start, end, 10) + np.random.normal(0, noise, 10)
+    return np.clip(trend, 0, None)
+
+
+# Scenario-aware signal drift generation
+if failure_mode == "Healthy":
+    # Healthy case: all drift values stay low and mostly stable.
+    temp_trend = make_trend(0.8, max(1.1, temp_error * 0.45), 0.25)
+    z_trend = make_trend(0.7, max(1.0, z_error * 0.45), 0.20)
+    vcm_trend = make_trend(0.7, max(1.0, force_error * 0.45), 0.20)
+
+elif failure_mode == "Non-wet open risk":
+    # Non-wet open is mainly thermal lag + insufficient bump collapse.
+    temp_trend = make_trend(max(2.0, temp_error * 0.45), temp_error, 0.55)
+    z_trend = make_trend(max(1.5, z_error * 0.45), z_error, 0.45)
+    vcm_trend = make_trend(max(0.8, force_error * 0.25), force_error * 0.65, 0.30)
+
+elif failure_mode == "Solder bridging risk":
+    # Bridging is mainly mechanical over-compression + force support.
+    temp_trend = make_trend(max(0.8, temp_error * 0.25), temp_error * 0.45, 0.30)
+    z_trend = make_trend(max(2.0, z_error * 0.45), z_error, 0.50)
+    vcm_trend = make_trend(max(1.5, force_error * 0.45), force_error, 0.50)
+
+elif failure_mode == "VCM-only anomaly":
+    # VCM abnormal, but Z-axis and temperature should stay mostly normal.
+    temp_trend = make_trend(0.7, max(1.1, temp_error * 0.40), 0.20)
+    z_trend = make_trend(0.7, max(1.1, z_error * 0.40), 0.20)
+    vcm_trend = make_trend(max(2.0, force_error * 0.45), force_error, 0.55)
+
+else:
+    # Mixed anomaly affects several signals.
+    temp_trend = make_trend(max(1.5, temp_error * 0.45), temp_error, 0.65)
+    z_trend = make_trend(max(1.5, z_error * 0.45), z_error, 0.60)
+    vcm_trend = make_trend(max(1.5, force_error * 0.45), force_error, 0.60)
+
+
+# Convert signal drift into risk trend using same weighting logic as the main score.
+raw_risk_trend = (
+    temp_trend * 1.2
+    + z_trend * 3.0
+    + vcm_trend * 1.0
+    + alignment_error
 )
+
+# If VCM alone is abnormal but Z is normal, avoid overclaiming direct reliability risk.
+if force_abnormal and not z_abnormal:
+    raw_risk_trend *= 0.75
+
+# Scale so the latest trend point matches the current dashboard risk score.
+if raw_risk_trend[-1] > 0:
+    risk_trend = raw_risk_trend / raw_risk_trend[-1] * risk_score
+else:
+    risk_trend = raw_risk_trend
+
+risk_trend = np.clip(risk_trend, 0, 95)
 
 trend_data = pd.DataFrame({
     "Cycle": cycle_ids,
-    "Reliability Risk Score": base_risks,
-    "Temperature Deviation": np.random.normal(temp_error, 2, 10),
-    "Z-axis Deviation": np.random.normal(z_error, 1, 10),
-    "Force Deviation": np.random.normal(force_error, 1.5, 10)
+    "Reliability Risk Score": risk_trend,
+    "Temperature Deviation": temp_trend,
+    "Z-axis Deviation": z_trend,
+    "VCM Current / Force Deviation": vcm_trend
 })
 
-st.line_chart(trend_data.set_index("Cycle")[["Reliability Risk Score"]])
+st.line_chart(
+    trend_data.set_index("Cycle")[["Reliability Risk Score"]]
+)
+
+st.subheader("Signal Drift Trend by Bonding Cycle")
+
+st.line_chart(
+    trend_data.set_index("Cycle")[[
+        "Temperature Deviation",
+        "Z-axis Deviation",
+        "VCM Current / Force Deviation"
+    ]]
+)
 
 trend_col1, trend_col2, trend_col3 = st.columns(3)
 
@@ -671,10 +758,40 @@ else:
 
 trend_col3.metric("Trend Status", trend_status)
 
+# Dominant signal drift amount
+signal_drift_amounts = {
+    "Temperature": trend_data["Temperature Deviation"].iloc[-1] - trend_data["Temperature Deviation"].iloc[0],
+    "Z-axis": trend_data["Z-axis Deviation"].iloc[-1] - trend_data["Z-axis Deviation"].iloc[0],
+    "VCM Current / Force": trend_data["VCM Current / Force Deviation"].iloc[-1] - trend_data["VCM Current / Force Deviation"].iloc[0],
+}
+
+dominant_signal = max(signal_drift_amounts, key=signal_drift_amounts.get)
+
+# Directional meaning based on actual physical direction indicators
+if dominant_signal == "Temperature":
+    if thermal_lag > 0:
+        dominant_direction = "temperature response is lagging below the healthy profile"
+    else:
+        dominant_direction = "temperature response may be overshooting the healthy profile"
+
+elif dominant_signal == "Z-axis":
+    if z_overtravel > z_undertravel:
+        dominant_direction = "Z-axis is moving deeper than expected, suggesting possible over-compression"
+    else:
+        dominant_direction = "Z-axis is stopping shallower than expected, suggesting insufficient bump collapse"
+
+else:
+    if force_high > force_low:
+        dominant_direction = "VCM/force response is higher than expected, suggesting the tool is working harder"
+    else:
+        dominant_direction = "VCM/force response is lower than expected, suggesting weaker or unstable compression"
+
 if trend_status == "Drifting Up":
     card(
         "Process Drift Warning",
-        "Reliability risk has increased over recent bonding cycles. Possible causes include bonding head wear, heater instability, alignment calibration drift, chuck contamination, or thermal contact degradation.",
+        f"Reliability risk has increased over recent bonding cycles. "
+        f"The dominant drifting signal is **{dominant_signal}**. "
+        f"Interpretation: {dominant_direction}.",
         "warn"
     )
 else:
@@ -683,6 +800,52 @@ else:
         "No severe process drift detected over recent bonding cycles.",
         "good"
     )
+
+# -------------------------------------------------
+# Signal drift interpretation guide
+# -------------------------------------------------
+st.subheader("Signal Drift Interpretation Guide")
+
+drift_table = pd.DataFrame({
+    "Signal Trend": [
+        "VCM current / force deviation drifting upward",
+        "VCM current / force deviation fluctuating or drifting downward",
+        "Z-axis deviation moving deeper",
+        "Z-axis deviation stopping shallower",
+        "Temperature deviation increasing due to slow ramp",
+        "Temperature overshoot"
+    ],
+    "Possible Physical Cause": [
+        "Increased mechanical friction, guide rail wear, or lubrication loss",
+        "Mechanical looseness, spring fatigue, or unstable holding force",
+        "Tool tip wear, thinner substrate, or over-compression tendency",
+        "Debris buildup, thicker incoming material, or blocked contact",
+        "Heater degradation, poor thermal contact, or increased heater resistance",
+        "Heater calibration drift or control loop overshoot"
+    ],
+    "Possible Risk": [
+        "Tool-health issue or incomplete compression risk",
+        "Die shift, weak joint, or unstable bonding risk",
+        "Solder bridging / over-compression risk",
+        "Non-wet open / insufficient contact risk",
+        "Non-wet open / cold joint risk",
+        "Solder bridging risk due to excessive solder flow"
+    ]
+})
+
+st.dataframe(
+    drift_table,
+    hide_index=True,
+    use_container_width=True
+)
+
+card(
+    "How to read this trend",
+    "The risk trend shows whether the overall bonding process is becoming more suspicious. "
+    "The signal drift trend shows which signal is driving that change. "
+    "The interpretation guide then helps engineers connect the drifting signal to possible physical causes.",
+    "info"
+)
 
 # -------------------------------------------------
 # Engineering interpretation
@@ -700,14 +863,14 @@ elif bridging_score > nonwet_score and bridging_score > 30:
     card(
         "Engineering Interpretation",
         "The current bonding cycle shows cross-validated mechanical evidence: Z-axis over-travel is supported by abnormal VCM/force behaviour and/or alignment offset. This indicates possible over-compression and asymmetric solder squeeze-out, increasing the risk of solder bridging between adjacent micro-bumps.",
-        "bad" if bridging_score > 75 else "warn"
+        "bad" if bridging_score > 80 else "warn"
     )
 
 elif nonwet_score > bridging_score and nonwet_score > 30:
     card(
         "Engineering Interpretation",
         "The current bonding cycle shows delayed thermal response and/or insufficient bump collapse. This indicates possible incomplete solder wetting, increasing the risk of non-wet open or cold joint formation.",
-        "bad" if nonwet_score > 75 else "warn"
+        "bad" if nonwet_score > 80 else "warn"
     )
 
 elif alignment_abnormal:
@@ -770,14 +933,14 @@ elif bridging_score > nonwet_score and bridging_score > 30:
     card(
         "Recommended Adjustment",
         "Review bonding force setting, check Z-axis compression limit, verify X/Y/theta alignment calibration, and inspect affected unit or lot for possible solder bridging.",
-        "bad" if bridging_score > 75 else "warn"
+        "bad" if bridging_score > 80 else "warn"
     )
 
 elif nonwet_score > bridging_score and nonwet_score > 30:
     card(
         "Recommended Adjustment",
         "Review temperature ramp rate, confirm peak bonding temperature, check thermal transfer stability, and inspect affected unit or lot for non-wet open or cold joint risk.",
-        "bad" if nonwet_score > 75 else "warn"
+        "bad" if nonwet_score > 80 else "warn"
     )
 
 elif alignment_abnormal:
